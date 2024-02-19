@@ -1,13 +1,14 @@
 import express, {Request, Response, NextFunction } from "express";
 import cors from 'cors';
-import mongoose, {ObjectId} from "mongoose";
+import mongoose from "mongoose";
 import jwt, { JwtPayload } from 'jsonwebtoken';
-import {User, Admin, Cart, Product, Review } from "database-model";
+
 
 
 
 const app = express();
 app.use(cors());
+app.use(express.json());
 const PORT = 5000;
 const jwtSecret = 'your-secret-key'; 
 
@@ -16,10 +17,62 @@ interface IRequest extends Request{
 }
 
 
+
+const userSchema = new mongoose.Schema({
+    userEmail: String,
+    userPassword: String,
+    userName:String,
+    dateOfCreation: Date,
+    userAddress: String,
+    phoneNumber: String,
+    profilePic: String,
+    reviewsByUser: [{type : mongoose.Schema.Types.ObjectId , ref : 'Review'}], 
+})
+
+const adminSchema = new mongoose.Schema({
+    adminEmail: String,
+    adminPassword: String,
+    adminName:String,
+    dateOfCreation: Date,
+    adminAddress: String,
+    phoneNumber: String,
+    profilePic: String,
+    productsByAdmin: [{type : mongoose.Schema.Types.ObjectId , ref : 'Product'}], 
+})
+
+const productSchema = new mongoose.Schema({
+    productName: String,
+    productDescription: String,
+    category:String,
+    price:Number,
+    adminOfProduct: { type : mongoose.Schema.Types.ObjectId ,ref : 'Admin' },
+    reviewsByUser: [{type : mongoose.Schema.Types.ObjectId , ref : 'Review'}],
+})
+
+
+const reviewSchema = new mongoose.Schema({
+    productId: { type : mongoose.Schema.Types.ObjectId , ref : 'Product'},
+    userId: { type : mongoose.Schema.Types.ObjectId , ref : 'User'},
+    rating: Number,
+    comment: String,
+})
+
+const cartSchema = new mongoose.Schema({
+    userId: { type : mongoose.Schema.Types.ObjectId , ref : 'User'},
+    productsInCart:[{ type : mongoose.Schema.Types.ObjectId , ref : 'Product'}],
+    totalAmmount: Number,
+})
+
+export const User = mongoose.model( "User", userSchema );
+export const Admin = mongoose.model("Admin", adminSchema);
+export const  Product = mongoose.model('Product', productSchema);
+export const  Review = mongoose.model('Review', reviewSchema);
+export const   Cart = mongoose.model('Cart', cartSchema);
+
 const connectDB = async() =>{
     try {
         await mongoose.connect('mongodb://127.0.0.1:27017/e_commerce_turbo');
-        console.log('databse is connected');
+        console.log('database is connected');
         
     } catch (error) {
         console.error(`error occured while connecting to db: ${error}`)
@@ -41,8 +94,9 @@ const checkPassword = (userPwd:string |null|undefined , inputPwd : string): bool
 
 //authentiacate token middleware;
 const authenticateJWT = async(req:IRequest, res:Response, next:NextFunction)=>{
-    const token = req.headers.authorization;
-    if(!token)return res.status(401).json({ message: 'No token provided' });
+    const authHead = req.headers.authorization;
+    if(!authHead)return res.status(401).json({ message: 'No token provided' });
+    const token = authHead.split(' ')[1];
     try {
         const decodeJwt = jwt.verify(token, jwtSecret) as JwtPayload;
         if(!decodeJwt) return res.status(401).json({ message: 'verification failed' });
@@ -342,6 +396,32 @@ app.post("/api/user/:productId/cart", authenticateJWT, async(req:IRequest, res: 
 
 
 //remove product from cart
+app.delete("/api/user/:productId/cart", authenticateJWT, async(req:IRequest, res:Response)=>{
+    const userId = req.userId;
+    const productId = req.params.productId;
+    try {
+        const cart = await Cart.findOne({userId: userId});
+        const product = await Product.findById(productId)
+        if (!cart) return res.status(401).json({message: "You do not have a shopping cart"});
+        const productIdOBJ = new mongoose.Types.ObjectId(productId);
+        let indexToRemove = cart.productsInCart.indexOf(productIdOBJ);
+        if(indexToRemove !== -1 ){
+            cart.productsInCart.splice(indexToRemove ,1);
+            cart.totalAmmount =(cart.totalAmmount || 0) - (product?.price || 0);
+            await cart.save()
+            return res.status(200).json({message:"Product has been removed from your cart.", cart});
+        } else{
+            return res.status(404).json({message:"The product was not found in your cart."})
+        }
+    } catch (error) {
+        res.status(500).json({message : error});
+    }
+})
+
+
+
+
+
 
 connectDB().then(()=>{
     app.listen(PORT, ()=>console.log(`server is listening on port ${PORT} `));
